@@ -450,101 +450,6 @@ footer{background:var(--bg2);border-top:1px solid var(--border);margin-top:50px;
 // RAPIDAPI - NOTÍCIAS FUTEBOL
 // ─────────────────────────────────────
 
-async function fetchRSS(url) {
-
-  try {
-
-    const proxy =
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-
-    const res = await fetch(proxy);
-
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
-
-    const xmlText = await res.text();
-
-    const parser = new DOMParser();
-
-    const xml = parser.parseFromString(
-      xmlText,
-      "text/xml"
-    );
-
-    const items =
-      [...xml.querySelectorAll("item")];
-
-    return items.map(item => {
-
-      const title =
-        item.querySelector("title")?.textContent || '';
-
-      const link =
-        item.querySelector("link")?.textContent || '#';
-
-      const pubDate =
-        item.querySelector("pubDate")?.textContent ||
-        new Date().toISOString();
-
-      const description =
-        item.querySelector("description")?.textContent || '';
-
-      let imageUrl = null;
-
-      // tenta pegar imagem
-      const enclosure =
-        item.querySelector("enclosure");
-
-      if (enclosure) {
-        imageUrl =
-          enclosure.getAttribute("url");
-      }
-
-      // filtro futebol
-      const txt =
-        (title + ' ' + description).toLowerCase();
-
-      const footballWords = [
-        'futebol',
-        'gol',
-        'flamengo',
-        'palmeiras',
-        'corinthians',
-        'vasco',
-        'bahia',
-        'neymar',
-        'real madrid',
-        'barcelona',
-        'champions',
-        'libertadores'
-      ];
-
-      const isFootball =
-        footballWords.some(w =>
-          txt.includes(w)
-        );
-
-      if (!isFootball) return null;
-
-      return {
-        title,
-        link,
-        pubDate,
-        imageUrl,
-        category: detectCat(txt),
-        sourceCat: 'RSS'
-      };
-
-    }).filter(Boolean);
-
-  } catch (err) {
-
-    console.error('[RSS]', url, err);
-
-    return [];
-  }
-}
 
 // ═══════════════════════════════════════════════════
 // ⚙️ CONFIG — coloque suas chaves aqui
@@ -566,13 +471,14 @@ const CONFIG = {
 
   // ─── ADICIONE SEUS FEEDS RSS AQUI ───────────────
   RSS_FEEDS: [
-     'https://feeds.feedburner.com/NoticiasDoFutebol',
-  'https://www.espn.com.br/rss/futebol.xml'
+      'https://www.espn.com.br/rss/futebol.xml',
+  'https://feeds.feedburner.com/NoticiasDoFutebol',
+  'https://rss.app/feeds/v1.1/_I7jFjT6He6NyJx6S.json'
 ],
   // ────────────────────────────────────────────────
 
   LEAGUE_IDS: { brasileirao:71, libertadores:13, champions:2, premier:39, laliga:140, seriea:135, bundesliga:78, ligue1:61 },
-  SEASON: new Date().getFullYear(),
+  SEASON: 2026,
 };
 
 // ─── Detecta chaves configuradas ─────────────────
@@ -633,28 +539,53 @@ function leagueKey(id) {
 // API-FOOTBALL — JOGOS
 // ═══════════════════════════════════════════════════
 async function fetchGames() {
-  if (!API_OK) {
-    document.getElementById('gamesEl').innerHTML = emptyState('⚙️','API-Football não configurada',`Adicione sua chave em <code>CONFIG.API_FOOTBALL_KEY</code>`);
-    return;
-  }
-  const today = new Date().toISOString().slice(0,10);
-  document.getElementById('dateLabel').textContent = fmtDate(today);
+
+  if (!API_OK) return;
+
+  const today =
+    new Date().toISOString().slice(0,10);
+
+  document.getElementById('dateLabel')
+    .textContent = fmtDate(today);
+
   try {
-    const leagues = Object.values(CONFIG.LEAGUE_IDS).map(id => `league=${id}`).join('&');
-    const res = await fetch(`https://${CONFIG.API_FOOTBALL_HOST}/fixtures?date=${today}&timezone=America/Sao_Paulo&${leagues}`,{
-      headers:{'x-apisports-key': CONFIG.API_FOOTBALL_KEY}
-    });
-    const data = await res.json();
-    if (data.response?.length) {
-      state.games = data.response.map(mapGame);
-    } else {
-      state.games = [];
+
+    const allGames = [];
+
+    for (const leagueId of Object.values(CONFIG.LEAGUE_IDS)) {
+
+      const url =
+        `https://${CONFIG.API_FOOTBALL_HOST}/fixtures?date=${today}&league=${leagueId}&season=${CONFIG.SEASON}`;
+
+      const res = await fetch(url, {
+        headers: {
+          'x-apisports-key': CONFIG.API_FOOTBALL_KEY,
+          'x-rapidapi-host': CONFIG.API_FOOTBALL_HOST
+        }
+      });
+
+      const data = await res.json();
+
+      if (data.response?.length) {
+
+        allGames.push(
+          ...data.response.map(mapGame)
+        );
+
+      }
+
     }
-  } catch(e) {
-    console.warn('[API-Football]', e);
+
+    state.games = allGames;
+
+  } catch (e) {
+
+    console.error('[fetchGames]', e);
+
     state.games = [];
-    document.getElementById('gamesEl').innerHTML = emptyState('⚠️','Erro ao buscar jogos','Verifique sua conexão ou tente novamente.');
+
   }
+
 }
 
 function mapGame(f) {
@@ -674,25 +605,128 @@ function mapGame(f) {
 
 // ═══════════════════════════════════════════════════
 // API-FOOTBALL — CLASSIFICAÇÃO
-// ═══════════════════════════════════════════════════
 async function fetchStandings(leagueId, key) {
-  if (!API_OK) return;
-  try {
-    const res = await fetch(`https://${CONFIG.API_FOOTBALL_HOST}/standings?league=${leagueId}&season=${CONFIG.SEASON}`,{
-      headers:{'x-apisports-key': CONFIG.API_FOOTBALL_KEY}
-    });
-    const data = await res.json();
-    const table = data.response?.[0]?.league?.standings?.[0];
-    if (table) {
-      const len = table.length;
-      state.standings[key] = table.slice(0,10).map(t => ({
-        pos:t.rank, team:t.team.name, j:t.all.played, v:t.all.win, pts:t.points,
-        cls: t.rank<=4?'pos-cl': t.rank<=6?'pos-eu': t.rank>=len-2?'pos-rel':'pos-ok'
-      }));
-    }
-  } catch(e) { console.warn('[Standings]', key, e); }
-}
 
+  if (!API_OK) return;
+
+  try {
+
+    async function sendAI() {
+
+  const input = document.getElementById('aiInput');
+  const btn   = document.getElementById('aiSendBtn');
+
+  const msg = input.value.trim();
+
+  if (!msg) return;
+
+  addMsg(msg, 'user');
+
+  input.value = '';
+
+  btn.disabled = true;
+
+  const typingEl =
+    addMsg('Analisando...', 'ai typing');
+
+  if (!GROQ_OK) {
+
+    typingEl.className = 'msg ai';
+
+    typingEl.textContent =
+      '⚙️ Configure CONFIG.GROQ_KEY para usar a IA.';
+
+    btn.disabled = false;
+
+    return;
+
+  }
+
+  try {
+
+    const res = await fetch(
+      'https://api.groq.com/openai/v1/chat/completions',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${CONFIG.GROQ_KEY}`
+        },
+        body: JSON.stringify({
+          model: 'llama3-70b-8192',
+          messages: [
+            {
+              role: 'system',
+              content:
+                'Você é um comentarista de futebol especialista.'
+            },
+            {
+              role: 'user',
+              content: msg
+            }
+          ]
+        })
+      }
+    );
+
+    const data = await res.json();
+
+    typingEl.className = 'msg ai';
+
+    typingEl.textContent =
+      data.choices?.[0]?.message?.content ||
+      'Sem resposta da IA.';
+
+  } catch (e) {
+
+    typingEl.className = 'msg ai';
+
+    typingEl.textContent =
+      '❌ Erro na IA.';
+
+  }
+
+  btn.disabled = false;
+
+  scrollMsgs();
+
+};
+
+    const data = await res.json();
+
+    const table =
+      data.response?.[0]?.league?.standings?.[0];
+
+    if (table) {
+
+      const len = table.length;
+
+      state.standings[key] =
+        table.slice(0,10).map(t => ({
+          pos: t.rank,
+          team: t.team.name,
+          j: t.all.played,
+          v: t.all.win,
+          pts: t.points,
+          cls:
+            t.rank <= 4
+              ? 'pos-cl'
+              : t.rank <= 6
+              ? 'pos-eu'
+              : t.rank >= len - 2
+              ? 'pos-rel'
+              : 'pos-ok'
+        }));
+
+    }
+
+  } catch (e) {
+
+    console.warn('[Standings]', key, e);
+
+  }
+
+}
 // ═══════════════════════════════════════════════════
 // RSS NEWS
 // ═══════════════════════════════════════════════════
@@ -733,35 +767,7 @@ async function fetchAllNews() {
       })
     );
 
-    // ESPN
-    try {
-
-      const res = await fetch(      
-        'https://site.api.espn.com/apis/site/v2/sports/soccer/news'
-      );
-
-      const data = await res.json();
-
-      if (data.articles) {
-
-        const espnNews = data.articles.map(item => ({
-          title: item.headline,
-          link: item.links?.web?.href || '#',
-          pubDate: item.published || new Date().toISOString(),
-          imageUrl: item.images?.[0]?.url || null,
-          category: detectCat(item.headline || ''),
-          sourceCat: 'ESPN'
-        }));
-
-        allItems.push(...espnNews);
-
-      }
-
-    } catch (err) {
-
-      console.error('[ESPN]', err);
-
-    }
+    
 
     // Remove duplicadas
     const seen = new Set();
@@ -801,15 +807,10 @@ async function fetchRSS(url) {
 
   try {
 
-    // NOVO PROXY
     const proxy =
       `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(url)}`;
 
     const res = await fetch(proxy);
-
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
 
     const data = await res.json();
 
@@ -817,59 +818,45 @@ async function fetchRSS(url) {
 
     return data.items.map(item => {
 
-      const title =
-        item.title || '';
+      const title = item.title || '';
+      const description = item.description || '';
 
-      const link =
-        item.link || '#';
+      const txt =
+        (title + ' ' + description).toLowerCase();
 
-      const pubDate =
-        item.pubDate || new Date().toISOString();
-
-      const description =
-        item.description || '';
-
-      // FILTRO FUTEBOL
       const footballWords = [
         'futebol',
         'gol',
-        'campeonato',
         'flamengo',
         'palmeiras',
         'corinthians',
         'vasco',
         'bahia',
-        'santos',
         'neymar',
         'real madrid',
         'barcelona',
-        'arsenal',
-        'chelsea',
-        'liverpool',
         'champions',
         'libertadores',
         'premier league'
       ];
 
-      const fullText =
-        (title + ' ' + description).toLowerCase();
-
       const isFootball =
-        footballWords.some(w => fullText.includes(w));
+        footballWords.some(w =>
+          txt.includes(w)
+        );
 
       if (!isFootball) return null;
 
       return {
         title,
-        link,
-        pubDate,
+        link: item.link || '#',
+        pubDate: item.pubDate || new Date().toISOString(),
         imageUrl:
           item.thumbnail ||
           item.enclosure?.link ||
-          null,
-        category:
-          detectCat(title + ' ' + description),
-        sourceCat: ''
+          'https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=1200&auto=format&fit=crop',
+        category: detectCat(txt),
+        sourceCat: 'RSS'
       };
 
     }).filter(Boolean);
@@ -918,19 +905,86 @@ async function sendAI() {
   ).join('; ');
 
   try {
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions',{
-      method:'POST',
-      headers:{'Authorization':`Bearer ${CONFIG.GROQ_KEY}`,'Content-Type':'application/json'},
-      body:JSON.stringify({
-        model:'llama3-8b-8192',
-        messages:[
-          {role:'system', content:`Você é um analista de futebol brasileiro especializado. Responda em português, de forma objetiva e precisa, máximo 3 frases. ${ctx ? 'Jogos de hoje: '+ctx : ''}`},
-          {role:'user', content:msg}
-        ],
-        temperature:0.6,
-        max_tokens:350
-      })
-    });
+    async function sendAI() {
+
+  const input = document.getElementById('aiInput');
+  const btn   = document.getElementById('aiSendBtn');
+
+  const msg = input.value.trim();
+
+  if (!msg) return;
+
+  addMsg(msg, 'user');
+
+  input.value = '';
+
+  btn.disabled = true;
+
+  const typingEl =
+    addMsg('Analisando...', 'ai typing');
+
+  if (!GROQ_OK) {
+
+    typingEl.className = 'msg ai';
+
+    typingEl.textContent =
+      '⚙️ Configure CONFIG.GROQ_KEY para usar a IA.';
+
+    btn.disabled = false;
+
+    return;
+
+  }
+
+  try {
+
+    const res = await fetch(
+      'https://api.groq.com/openai/v1/chat/completions',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${CONFIG.GROQ_KEY}`
+        },
+        body: JSON.stringify({
+          model: 'llama3-70b-8192',
+          messages: [
+            {
+              role: 'system',
+              content:
+                'Você é um comentarista de futebol especialista.'
+            },
+            {
+              role: 'user',
+              content: msg
+            }
+          ]
+        })
+      }
+    );
+
+    const data = await res.json();
+
+    typingEl.className = 'msg ai';
+
+    typingEl.textContent =
+      data.choices?.[0]?.message?.content ||
+      'Sem resposta da IA.';
+
+  } catch (e) {
+
+    typingEl.className = 'msg ai';
+
+    typingEl.textContent =
+      '❌ Erro na IA.';
+
+  }
+
+  btn.disabled = false;
+
+  scrollMsgs();
+
+};
     const data = await res.json();
     typingEl.className='msg ai';
     typingEl.textContent = data.choices?.[0]?.message?.content || 'Sem resposta da IA.';
@@ -990,8 +1044,8 @@ function gameCard(g) {
   const live=g.status==='LIVE', ft=g.status==='FT', ns=g.status==='NS';
   const hasScore=g.score.h!==null;
   const favH=state.favTeams.includes(g.home.name), favA=state.favTeams.includes(g.away.name);
-  const homeImg=g.home.logo?`<img src="${g.home.logo}" alt="${g.home.name}" loading="lazy" onerror="this.style.display='none'">`:'';
-  const awayImg=g.away.logo?`<img src="${g.away.logo}" alt="${g.away.name}" loading="lazy" onerror="this.style.display='none'">`:'';
+  const homeImg=g.home.logo?`<img src="${g.home.logo}" alt="${g.home.name}" loading="lazy" onerror="this.src='https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=1200&auto=format&fit=crop'">`:'';
+  const awayImg=g.away.logo?`<img src="${g.away.logo}" alt="${g.away.name}" loading="lazy" onerror="this.src='https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=1200&auto=format&fit=crop'">`:'';
   const badge = live
     ? `<span class="gc-badge badge-live">🔴 ${g.time}</span>`
     : ns ? `<span class="gc-badge badge-ns">${g.time}</span>`
@@ -1055,7 +1109,7 @@ function renderFavTeams() {
     }
     const logo=g?(g.home.name===t?g.home.logo:g.away.logo):null;
     return `<div class="fav-row">
-      <div class="fav-name">${logo?`<img src="${logo}" onerror="this.style.display='none'">`:'⚽'} ${t}</div>
+      <div class="fav-name">${logo?`<img src="${logo}" onerror="this.src='https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=1200&auto=format&fit=crop'">`:'⚽'} ${t}</div>
       <span class="fav-status${isLive?' live':''}">${statusTxt}</span>
       <button class="fav-remove" onclick="toggleFav('${t}')" title="Remover">✕</button>
     </div>`;
@@ -1081,7 +1135,7 @@ function renderNews() {
   const hero = finalList[0];
   document.getElementById('newsHeroEl').innerHTML=`
     <div class="news-hero" onclick="openLink('${encodeURIComponent(hero.link)}')">
-      ${hero.imageUrl ? `<img src="${hero.imageUrl}" alt="${esc(hero.title)}" loading="lazy" onerror="this.style.display='none'">` : `<div style="width:100%;height:100%;background:linear-gradient(135deg,#0d0f1a,#070810);display:flex;align-items:center;justify-content:center;font-size:60px;opacity:.25">⚽</div>`}
+      ${hero.imageUrl ? `<img src="${hero.imageUrl}" alt="${esc(hero.title)}" loading="lazy" onerror="this.src='https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=1200&auto=format&fit=crop'">` : `<div style="width:100%;height:100%;background:linear-gradient(135deg,#0d0f1a,#070810);display:flex;align-items:center;justify-content:center;font-size:60px;opacity:.25">⚽</div>`}
       <div class="news-hero-overlay"></div>
       <div class="news-hero-body">
         <div class="news-cat-tag">${catLabel(hero.category)}</div>
