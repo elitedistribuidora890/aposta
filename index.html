@@ -264,6 +264,70 @@ footer{background:var(--bg2);border-top:1px solid var(--border);margin-top:50px;
 .gc-body{
   min-width:0;
 }   
+/* ───────── LEAGUES ───────── */
+
+.league-section{
+  margin-bottom:14px;
+}
+
+.league-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:14px 16px;
+  background:var(--card2);
+  border:1px solid var(--border);
+  border-radius:12px;
+  cursor:pointer;
+  transition:.2s;
+}
+
+.league-header:hover{
+  border-color:var(--accent-border);
+}
+
+.league-left{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+.league-icon{
+  font-size:18px;
+}
+
+.league-name{
+  font-size:14px;
+  font-weight:700;
+  color:var(--text);
+}
+
+.league-right{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  font-size:12px;
+  color:var(--text2);
+}
+
+.league-arrow{
+  transition:.2s;
+}
+
+.league-section.closed .league-arrow{
+  transform:rotate(-90deg);
+}
+
+.league-games{
+  display:flex;
+  flex-direction:column;
+  gap:7px;
+  margin-top:8px;
+}
+
+.league-section.closed .league-games{
+  display:none;
+}
 </style>
 </head>
 <body>
@@ -455,8 +519,8 @@ footer{background:var(--bg2);border-top:1px solid var(--border);margin-top:50px;
 // ⚙️ CONFIG — coloque suas chaves aqui
 // ═══════════════════════════════════════════════════
 const CONFIG = {
-  API_FOOTBALL_KEY: 'af97dbedb7ffe5018648248ce62f2f70',
-  API_FOOTBALL_HOST: 'v3.football.api-sports.io',
+  FOOTBALL_DATA_KEY: '69db5fae34c38a5e906dffb1dabbab21',
+
 
   GROQ_KEY: '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',
 
@@ -471,18 +535,17 @@ const CONFIG = {
 
   // ─── ADICIONE SEUS FEEDS RSS AQUI ───────────────
   RSS_FEEDS: [
-      'https://www.espn.com.br/rss/futebol.xml',
-  'https://feeds.feedburner.com/NoticiasDoFutebol',
-  'https://rss.app/feeds/v1.1/_I7jFjT6He6NyJx6S.json'
+'https://www.espn.com.br/rss/futebol.xml',
+  'https://feeds.feedburner.com/NoticiasDoFutebol'
 ],
   // ────────────────────────────────────────────────
 
   LEAGUE_IDS: { brasileirao:71, libertadores:13, champions:2, premier:39, laliga:140, seriea:135, bundesliga:78, ligue1:61 },
-  SEASON: 2026,
+  SEASON: 2024
 };
 
 // ─── Detecta chaves configuradas ─────────────────
-const API_OK  = CONFIG.API_FOOTBALL_KEY && !CONFIG.API_FOOTBALL_KEY.includes('SUA_');
+const API_OK  = CONFIG.FOOTBALL_DATA_KEY && !CONFIG.FOOTBALL_DATA_KEY.includes('SUA_');
 const GROQ_OK = CONFIG.GROQ_KEY && !CONFIG.GROQ_KEY.includes('SUA_');
 const FB_OK   = CONFIG.FIREBASE.apiKey && !CONFIG.FIREBASE.apiKey.includes('SUA_');
 const RSS_OK  = CONFIG.RSS_FEEDS.length > 0;
@@ -540,159 +603,181 @@ function leagueKey(id) {
 // ═══════════════════════════════════════════════════
 async function fetchGames() {
 
-  if (!API_OK) return;
-
-  const today =
-    new Date().toISOString().slice(0,10);
-
-  document.getElementById('dateLabel')
-    .textContent = fmtDate(today);
-
   try {
 
-    const allGames = [];
+    const competitions = [
+      'BSA', // Brasileirão
+      'CL',  // Champions
+      'PL',  // Premier League
+      'PD'   // La Liga
+    ];
 
-    for (const leagueId of Object.values(CONFIG.LEAGUE_IDS)) {
+    let allGames = [];
 
-      const url =
-        `https://${CONFIG.API_FOOTBALL_HOST}/fixtures?date=${today}&league=${leagueId}&season=${CONFIG.SEASON}`;
+    for (const code of competitions) {
 
-      const res = await fetch(url, {
-        headers: {
-          'x-apisports-key': CONFIG.API_FOOTBALL_KEY,
-          'x-rapidapi-host': CONFIG.API_FOOTBALL_HOST
+      const res = await fetch(
+        `https://api.football-data.org/v4/competitions/${code}/matches`,
+        {
+          headers: {
+            'X-Auth-Token': '4c378190aa694387b33518af960669de'
+          }
         }
-      });
+      );
 
       const data = await res.json();
 
-      if (data.response?.length) {
+      console.log(code, data);
 
-        allGames.push(
-          ...data.response.map(mapGame)
-        );
+      if (data.matches) {
+
+        allGames.push(...data.matches);
 
       }
 
     }
 
-    state.games = allGames;
+    state.games = allGames.map(m => ({
 
-  } catch (e) {
+      id: m.id,
 
-    console.error('[fetchGames]', e);
+      league: m.competition.name,
 
-    state.games = [];
+      leagueKey: leagueKeyByCode(m.competition.code),
+
+      flag: leagueFlagByCode(m.competition.code),
+
+      home: {
+        name: m.homeTeam.name,
+        logo: m.homeTeam.crest
+      },
+
+      away: {
+        name: m.awayTeam.name,
+        logo: m.awayTeam.crest
+      },
+
+      score: {
+        h: m.score.fullTime.home,
+        a: m.score.fullTime.away
+      },
+
+      status:
+        m.status === 'IN_PLAY'
+          ? 'LIVE'
+          : m.status === 'FINISHED'
+          ? 'FT'
+          : 'NS',
+
+      time:
+        m.status === 'TIMED'
+          ? fmtTime(m.utcDate)
+          : m.status
+
+    }));
+
+    renderGames();
+    renderLeaguePills();
+    renderTicker();
+
+  } catch (err) {
+
+    console.error(err);
 
   }
 
 }
 
-function mapGame(f) {
-  const s = f.fixture.status;
-  let status = 'NS', time = fmtTime(f.fixture.date);
-  if (['FT','AET','PEN'].includes(s.short)) { status='FT'; time='FT'; }
-  else if (['1H','2H','HT','ET','BT','P','INT'].includes(s.short)) { status='LIVE'; time=s.elapsed ? `${s.elapsed}'` : '⚡'; }
+function leagueFlagByCode(code) {
+
   return {
-    id: f.fixture.id,
-    league: f.league.name, flag: leagueFlag(f.league.id), leagueKey: leagueKey(f.league.id),
-    home: { name: f.teams.home.name, logo: f.teams.home.logo },
-    away: { name: f.teams.away.name, logo: f.teams.away.logo },
-    score: { h: f.goals.home, a: f.goals.away },
-    status, time
-  };
+    BSA:'🇧🇷',
+    CL:'⭐',
+    PL:'🏴',
+    PD:'🇪🇸'
+  }[code] || '🌍';
+
 }
 
+function leagueKeyByCode(code) {
+
+  return {
+    BSA:'brasileirao',
+    CL:'champions',
+    PL:'premier',
+    PD:'laliga'
+  }[code] || 'outros';
+
+}
+
+
+
+function mapGame(g) {
+
+  return {
+
+    id: g.fixture.id,
+
+    league: g.league.name,
+
+    leagueKey: leagueKey(g.league.id),
+
+    flag: leagueFlag(g.league.id),
+
+    status:
+      g.fixture.status.short === 'NS'
+        ? 'NS'
+        : g.fixture.status.short === 'FT'
+        ? 'FT'
+        : 'LIVE',
+
+    time:
+      g.fixture.status.short === 'NS'
+        ? fmtTime(g.fixture.date)
+        : g.fixture.status.elapsed
+        ? `${g.fixture.status.elapsed}'`
+        : 'AO VIVO',
+
+    home: {
+      name: g.teams.home.name,
+      logo: g.teams.home.logo
+    },
+
+    away: {
+      name: g.teams.away.name,
+      logo: g.teams.away.logo
+    },
+
+    score: {
+      h: g.goals.home,
+      a: g.goals.away
+    }
+
+  };
+
+}
 // ═══════════════════════════════════════════════════
 // API-FOOTBALL — CLASSIFICAÇÃO
+// ═══════════════════════════════════════════════════
 async function fetchStandings(leagueId, key) {
 
   if (!API_OK) return;
 
   try {
 
-    async function sendAI() {
+    const url =
+      `https://v3.football.api-sports.io/standings?league=${leagueId}`;
 
-  const input = document.getElementById('aiInput');
-  const btn   = document.getElementById('aiSendBtn');
-
-  const msg = input.value.trim();
-
-  if (!msg) return;
-
-  addMsg(msg, 'user');
-
-  input.value = '';
-
-  btn.disabled = true;
-
-  const typingEl =
-    addMsg('Analisando...', 'ai typing');
-
-  if (!GROQ_OK) {
-
-    typingEl.className = 'msg ai';
-
-    typingEl.textContent =
-      '⚙️ Configure CONFIG.GROQ_KEY para usar a IA.';
-
-    btn.disabled = false;
-
-    return;
-
-  }
-
-  try {
-
-    const res = await fetch(
-      'https://api.groq.com/openai/v1/chat/completions',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${CONFIG.GROQ_KEY}`
-        },
-        body: JSON.stringify({
-          model: 'llama3-70b-8192',
-          messages: [
-            {
-              role: 'system',
-              content:
-                'Você é um comentarista de futebol especialista.'
-            },
-            {
-              role: 'user',
-              content: msg
-            }
-          ]
-        })
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'x-apisports-key': CONFIG.FOOTBALL_DATA_KEY
       }
-    );
+    });
 
     const data = await res.json();
 
-    typingEl.className = 'msg ai';
-
-    typingEl.textContent =
-      data.choices?.[0]?.message?.content ||
-      'Sem resposta da IA.';
-
-  } catch (e) {
-
-    typingEl.className = 'msg ai';
-
-    typingEl.textContent =
-      '❌ Erro na IA.';
-
-  }
-
-  btn.disabled = false;
-
-  scrollMsgs();
-
-};
-
-    const data = await res.json();
+    console.log('[STANDINGS]', key, data);
 
     const table =
       data.response?.[0]?.league?.standings?.[0];
@@ -717,6 +802,8 @@ async function fetchStandings(leagueId, key) {
               ? 'pos-rel'
               : 'pos-ok'
         }));
+
+      renderStandings(key);
 
     }
 
@@ -816,50 +903,65 @@ async function fetchRSS(url) {
 
     if (!data.items) return [];
 
-    return data.items.map(item => {
+    return data.items
+  .map(item => {
 
-      const title = item.title || '';
-      const description = item.description || '';
+    const title = item.title || '';
+    const description = item.description || '';
 
-      const txt =
-        (title + ' ' + description).toLowerCase();
+    const txt =
+      (title + ' ' + description).toLowerCase();
 
-      const footballWords = [
-        'futebol',
-        'gol',
-        'flamengo',
-        'palmeiras',
-        'corinthians',
-        'vasco',
-        'bahia',
-        'neymar',
-        'real madrid',
-        'barcelona',
-        'champions',
-        'libertadores',
-        'premier league'
-      ];
+    const footballWords = [
+      'futebol',
+      'gol',
+      'flamengo',
+      'palmeiras',
+      'corinthians',
+      'vasco',
+      'bahia',
+      'neymar',
+      'real madrid',
+      'barcelona',
+      'champions',
+      'libertadores',
+      'premier league'
+    ];
 
-      const isFootball =
-        footballWords.some(w =>
-          txt.includes(w)
-        );
+    const isFootball =
+      footballWords.some(w =>
+        txt.includes(w)
+      );
 
-      if (!isFootball) return null;
+    if (!isFootball) return null;
 
-      return {
-        title,
-        link: item.link || '#',
-        pubDate: item.pubDate || new Date().toISOString(),
-        imageUrl:
-          item.thumbnail ||
-          item.enclosure?.link ||
-          'https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=1200&auto=format&fit=crop',
-        category: detectCat(txt),
-        sourceCat: 'RSS'
-      };
+    return {
 
-    }).filter(Boolean);
+      title,
+
+      link: item.link || '#',
+
+      pubDate:
+        item.pubDate ||
+        new Date().toISOString(),
+
+      imageUrl:
+        (
+          item.thumbnail &&
+          !item.thumbnail.includes('blogspot.com')
+        )
+          ? item.thumbnail
+          : (
+              item.enclosure?.link &&
+              !item.enclosure.link.includes('blogspot.com')
+            )
+          ? item.enclosure.link
+          : 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=1200&auto=format&fit=crop'
+
+    };
+
+  })
+  .filter(Boolean);
 
   } catch (err) {
 
@@ -882,30 +984,8 @@ function detectCat(text) {
 // ═══════════════════════════════════════════════════
 // GROQ — AI CHAT
 // ═══════════════════════════════════════════════════
+
 async function sendAI() {
-  const input = document.getElementById('aiInput');
-  const btn   = document.getElementById('aiSendBtn');
-  const msg   = input.value.trim();
-  if (!msg) return;
-
-  addMsg(msg, 'user');
-  input.value = '';
-  btn.disabled = true;
-  const typingEl = addMsg('Analisando...', 'ai typing');
-
-  if (!GROQ_OK) {
-    typingEl.className='msg ai';
-    typingEl.textContent='⚙️ Configure CONFIG.GROQ_KEY para usar o analista IA.';
-    btn.disabled = false;
-    return;
-  }
-
-  const ctx = state.games.slice(0,8).map(g =>
-    `${g.home.name} x ${g.away.name} (${g.league}, ${g.status==='LIVE'?g.time+' ao vivo':g.status==='FT'?'Encerrado '+g.score.h+'-'+g.score.a:g.time})`
-  ).join('; ');
-
-  try {
-    async function sendAI() {
 
   const input = document.getElementById('aiInput');
   const btn   = document.getElementById('aiSendBtn');
@@ -952,7 +1032,7 @@ async function sendAI() {
             {
               role: 'system',
               content:
-                'Você é um comentarista de futebol especialista.'
+                'Você é um comentarista especialista em futebol.'
             },
             {
               role: 'user',
@@ -984,31 +1064,7 @@ async function sendAI() {
 
   scrollMsgs();
 
-};
-    const data = await res.json();
-    typingEl.className='msg ai';
-    typingEl.textContent = data.choices?.[0]?.message?.content || 'Sem resposta da IA.';
-  } catch(e) {
-    typingEl.className='msg ai';
-    typingEl.textContent='❌ Erro na conexão com IA. Tente novamente.';
-  }
-  btn.disabled=false;
-  scrollMsgs();
 }
-
-function addMsg(text, cls) {
-  const box = document.getElementById('aiMessages');
-  const div = document.createElement('div');
-  div.className=`msg ${cls}`;
-  div.textContent=text;
-  box.appendChild(div);
-  scrollMsgs();
-  return div;
-}
-function scrollMsgs() {
-  const b=document.getElementById('aiMessages'); b.scrollTop=b.scrollHeight;
-}
-
 // ═══════════════════════════════════════════════════
 // RENDERS
 // ═══════════════════════════════════════════════════
@@ -1022,22 +1078,106 @@ function renderLeaguePills() {
 }
 
 function renderGames() {
-  const filtered = state.leagueFilter==='all' ? state.games : state.games.filter(g=>g.leagueKey===state.leagueFilter);
-  const liveC = state.games.filter(g=>g.status==='LIVE').length;
-  document.getElementById('liveCount').textContent = liveC;
+
+  const filtered =
+    state.leagueFilter === 'all'
+      ? state.games
+      : state.games.filter(
+          g => g.leagueKey === state.leagueFilter
+        );
+
+  const liveC =
+    state.games.filter(g => g.status === 'LIVE').length;
+
+  document.getElementById('liveCount').textContent =
+    liveC;
 
   if (!filtered.length) {
-    document.getElementById('gamesEl').innerHTML = emptyState('⚽','Nenhum jogo encontrado','Tente outro filtro ou volte mais tarde.');
+
+    document.getElementById('gamesEl').innerHTML =
+      emptyState(
+        '⚽',
+        'Nenhum jogo encontrado',
+        'Tente outro filtro.'
+      );
+
     return;
   }
 
-  // Sort: LIVE first, then NS, then FT
-  const sorted = [...filtered].sort((a,b) => {
-    const order = {LIVE:0,NS:1,FT:2};
-    return (order[a.status]??1)-(order[b.status]??1);
+  // ORGANIZA POR LIGA
+  const groups = {};
+
+  filtered.forEach(game => {
+
+    if (!groups[game.league]) {
+      groups[game.league] = [];
+    }
+
+    groups[game.league].push(game);
+
   });
 
-  document.getElementById('gamesEl').innerHTML = sorted.map(g => gameCard(g)).join('');
+  // ORDEM DAS LIGAS
+
+ const priority = [
+  'Serie A',
+    'Brazil - Serie A',
+  'Copa Libertadores',
+  'UEFA Champions League',
+  'Premier League',
+  'La Liga'
+];
+  const sortedLeagues =
+    Object.keys(groups).sort((a, b) => {
+
+      const ia = priority.indexOf(a);
+      const ib = priority.indexOf(b);
+
+      if (ia === -1) return 1;
+      if (ib === -1) return -1;
+
+      return ia - ib;
+
+    });
+
+  document.getElementById('gamesEl').innerHTML =
+    sortedLeagues.map(league => {
+
+      const games = groups[league];
+
+      return `
+        <div class="league-section">
+
+          <div class="league-header"
+               onclick="toggleLeague(this)">
+
+            <div class="league-left">
+              <span class="league-icon">
+                ${games[0].flag}
+              </span>
+
+              <span class="league-name">
+                ${league}
+              </span>
+            </div>
+
+            <div class="league-right">
+              ${games.length} jogos
+              <span class="league-arrow">⌄</span>
+            </div>
+
+          </div>
+
+          <div class="league-games">
+
+            ${games.map(g => gameCard(g)).join('')}
+
+          </div>
+
+        </div>
+      `;
+
+    }).join('');
 }
 
 function gameCard(g) {
@@ -1227,9 +1367,23 @@ function filterNews(cat,el) {
   document.querySelectorAll('#newsPills .lpill').forEach(p=>p.classList.remove('on'));
   el.classList.add('on'); state.newsCat=cat; renderNews();
 }
-function showStand(key,el) {
-  document.querySelectorAll('.stand-tab').forEach(t=>t.classList.remove('on'));
-  el.classList.add('on'); state.currentStand=key; renderStandings(key);
+async function showStand(key,el) {
+
+  document
+    .querySelectorAll('.stand-tab')
+    .forEach(t=>t.classList.remove('on'));
+
+  el.classList.add('on');
+
+  state.currentStand = key;
+
+  await fetchStandings(
+    CONFIG.LEAGUE_IDS[key],
+    key
+  );
+
+  renderStandings(key);
+
 }
 function closeMob() { document.getElementById('mobMenu').classList.remove('open'); }
 document.getElementById('menuToggle').addEventListener('click',()=>document.getElementById('mobMenu').classList.toggle('open'));
@@ -1244,12 +1398,13 @@ async function init() {
   // Paraleliza requisições
 await Promise.all([
   fetchGames(),
-  fetchAllNews(),
-  fetchStandings(CONFIG.LEAGUE_IDS.brasileirao,'brasileirao'),
-  fetchStandings(CONFIG.LEAGUE_IDS.champions,'champions'),
-  fetchStandings(CONFIG.LEAGUE_IDS.premier,'premier'),
-  fetchStandings(CONFIG.LEAGUE_IDS.laliga,'laliga'),
+  fetchAllNews()
 ]);
+
+await fetchStandings(
+  CONFIG.LEAGUE_IDS.brasileirao,
+  'brasileirao'
+);
 
   renderLeaguePills();
   renderGames();
@@ -1275,9 +1430,16 @@ await Promise.all([
   setInterval(async () => {
     await fetchAllNews();
     renderNews();
-  }, 600000);
+  }, 120000);
 }
+function toggleLeague(el){
 
+  const section =
+    el.parentElement;
+
+  section.classList.toggle('closed');
+
+}
 document.addEventListener('DOMContentLoaded', init);
 </script>
 </body>
